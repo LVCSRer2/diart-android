@@ -2,7 +2,7 @@ package com.diart.android
 
 data class SettingsState(
     /** 활성 화자 감지 임계값 (낮을수록 민감) */
-    val tauActive: Float = 0.4f,
+    val tauActive: Float = 0.2f,
     /** 새 화자 등록 코사인 거리 임계값 (낮을수록 화자 분리 잘 됨) */
     val deltaNow: Float = 0.40f,
     /** 센트로이드 EMA 업데이트 비율 (낮을수록 안정적) */

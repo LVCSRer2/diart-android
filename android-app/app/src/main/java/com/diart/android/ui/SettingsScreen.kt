@@ -134,7 +134,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             SectionHeader("기본값 참고")
             InfoCard(
-                "tauActive=0.4  deltaNow=0.40  rhoUpdate=0.10\n" +
+                "tauActive=0.2  deltaNow=0.40  rhoUpdate=0.10\n" +
                 "gamma=3.0  beta=10.0  maxSpeakers=20\n" +
                 "ahcThreshold=0.35"
             )
