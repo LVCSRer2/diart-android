@@ -1,0 +1,273 @@
+package com.diart.android.ui
+
+import android.media.MediaPlayer
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.diart.android.pipeline.SpeakerTurn
+import com.diart.android.ui.theme.speakerColor
+import kotlinx.coroutines.delay
+import java.io.File
+import kotlin.math.max
+
+@Composable
+fun PlaybackScreen(
+    audioFile: File,
+    turns: List<SpeakerTurn>,
+    totalDurationSec: Float,
+    onBack: () -> Unit,
+) {
+    val mediaPlayer = remember { MediaPlayer() }
+    var isPlaying by remember { mutableStateOf(false) }
+    var currentPositionSec by remember { mutableFloatStateOf(0f) }
+    var duration by remember { mutableFloatStateOf(max(totalDurationSec, 1f)) }
+    var prepared by remember { mutableStateOf(false) }
+
+    // MediaPlayer 초기화
+    DisposableEffect(audioFile) {
+        try {
+            mediaPlayer.setDataSource(audioFile.absolutePath)
+            mediaPlayer.prepare()
+            duration = mediaPlayer.duration / 1000f
+            prepared = true
+        } catch (e: Exception) {
+            prepared = false
+        }
+        mediaPlayer.setOnCompletionListener {
+            isPlaying = false
+        }
+        onDispose {
+            mediaPlayer.release()
+        }
+    }
+
+    // 재생 위치 폴링
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            currentPositionSec = mediaPlayer.currentPosition / 1000f
+            delay(80)
+        }
+    }
+
+    // 현재 위치에서 활성 화자
+    val activeSpeaker = turns
+        .filter { it.startSec <= currentPositionSec && it.endSec >= currentPositionSec }
+        .maxByOrNull { it.durationSec }
+        ?.speakerId ?: -1
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+    ) {
+        // 헤더
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = {
+                if (isPlaying) mediaPlayer.pause()
+                onBack()
+            }) {
+                Text("← 뒤로", fontSize = 14.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "녹음 재생",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(64.dp))
+        }
+
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(12.dp))
+
+        // 현재 발화 화자 표시
+        PlaybackSpeakerCard(activeSpeaker, isPlaying)
+        Spacer(Modifier.height(12.dp))
+
+        // 타임라인 플롯 (전체 녹음 + 커서)
+        DiarizationPlot(
+            turns = turns,
+            processedSec = duration,
+            windowSec = 30f,
+            currentPositionSec = currentPositionSec,
+            onSeek = { timeSec ->
+                currentPositionSec = timeSec
+                mediaPlayer.seekTo((timeSec * 1000).toInt())
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // 시간 표시
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = formatPlaybackTime(currentPositionSec),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = formatPlaybackTime(duration),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // Seek 슬라이더
+        Slider(
+            value = currentPositionSec,
+            onValueChange = { pos ->
+                currentPositionSec = pos
+                mediaPlayer.seekTo((pos * 1000).toInt())
+            },
+            valueRange = 0f..duration,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // 재생/일시정지 버튼
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 10초 뒤로
+            FilledTonalIconButton(
+                onClick = {
+                    val pos = (currentPositionSec - 10f).coerceAtLeast(0f)
+                    currentPositionSec = pos
+                    mediaPlayer.seekTo((pos * 1000).toInt())
+                },
+                modifier = Modifier.size(48.dp),
+            ) { Text("−10s", fontSize = 10.sp) }
+
+            Spacer(Modifier.width(16.dp))
+
+            // 재생/일시정지
+            Button(
+                onClick = {
+                    if (!prepared) return@Button
+                    if (isPlaying) {
+                        mediaPlayer.pause()
+                        isPlaying = false
+                    } else {
+                        if (currentPositionSec >= duration - 0.1f) {
+                            mediaPlayer.seekTo(0)
+                            currentPositionSec = 0f
+                        }
+                        mediaPlayer.start()
+                        isPlaying = true
+                    }
+                },
+                enabled = prepared,
+                modifier = Modifier.size(64.dp),
+                shape = CircleShape,
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Text(
+                    text = if (isPlaying) "⏸" else "▶",
+                    fontSize = 24.sp,
+                )
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            // 10초 앞으로
+            FilledTonalIconButton(
+                onClick = {
+                    val pos = (currentPositionSec + 10f).coerceAtMost(duration)
+                    currentPositionSec = pos
+                    mediaPlayer.seekTo((pos * 1000).toInt())
+                },
+                modifier = Modifier.size(48.dp),
+            ) { Text("+10s", fontSize = 10.sp) }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // 통계
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            val speakerCount = turns.map { it.speakerId }.toSet().size
+            StatChip("${speakerCount}명 감지")
+            StatChip("${turns.size}개 구간")
+            StatChip("총 ${duration.toInt()}초")
+        }
+    }
+}
+
+@Composable
+private fun PlaybackSpeakerCard(speakerId: Int, isPlaying: Boolean) {
+    val color = if (speakerId >= 0) speakerColor(speakerId) else Color.Gray
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = color.copy(alpha = 0.15f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.4f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(12.dp),
+                shape = CircleShape,
+                color = if (speakerId >= 0) color else Color.Gray,
+            ) {}
+            Text(
+                text = if (speakerId >= 0) "발화 중: 화자 ${speakerId + 1}"
+                       else if (isPlaying) "침묵 구간"
+                       else "재생 대기",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (speakerId >= 0) color else Color.Gray,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatChip(text: String) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun formatPlaybackTime(sec: Float): String {
+    val m = (sec / 60).toInt()
+    val s = (sec % 60).toInt()
+    return "%02d:%02d".format(m, s)
+}

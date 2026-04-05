@@ -2,16 +2,21 @@ package com.diart.android.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
@@ -20,16 +25,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.diart.android.pipeline.SpeakerTurn
 import com.diart.android.ui.theme.speakerColor
-import kotlin.math.ceil
 import kotlin.math.max
 
 /**
  * 화자 분리 결과를 간트 차트(타임라인 플롯)로 표시합니다.
  *
- * - 각 행: 화자 한 명
- * - X축: 시간(초)
- * - 색상 블록: 해당 화자의 발화 구간
- * - 최근 [windowSec]초 구간을 보여줌 (처리 시간이 윈도우를 초과하면 스크롤)
+ * - 화면에는 항상 [windowSec]초 구간만 표시
+ * - 전체 녹음이 길면 가로 스크롤로 탐색
+ * - [currentPositionSec] >= 0이면 재생 커서를 표시하고 자동 추적
  */
 @Composable
 fun DiarizationPlot(
@@ -37,19 +40,35 @@ fun DiarizationPlot(
     processedSec: Float,
     modifier: Modifier = Modifier,
     windowSec: Float = 30f,
+    currentPositionSec: Float = -1f,
+    onSeek: ((Float) -> Unit)? = null,
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
     val labelColor = Color(0xFF9E9E9E)
     val gridColor = Color(0xFF2E2E2E)
     val rowHeight = 28.dp
     val labelWidth = 52.dp
     val axisHeight = 20.dp
 
-    // 등장한 화자 목록 (ID 순 정렬)
     val speakerIds = turns.map { it.speakerId }.toSortedSet().toList()
     val numSpeakers = max(1, speakerIds.size)
-
     val totalHeight = rowHeight * numSpeakers + axisHeight
+    val totalDuration = max(processedSec, windowSec)
+
+    val scrollState = rememberScrollState()
+
+    // 자동 스크롤: 라이브 뷰에서만 최신 구간이 보이도록 스크롤
+    if (currentPositionSec < 0f) {
+        LaunchedEffect(processedSec) {
+            val maxScroll = scrollState.maxValue
+            if (maxScroll > 0 && totalDuration > windowSec) {
+                val fraction = ((processedSec - windowSec / 2f) / (totalDuration - windowSec))
+                    .coerceIn(0f, 1f)
+                scrollState.scrollTo((fraction * maxScroll).toInt())
+            }
+        }
+    }
 
     Column(modifier = modifier) {
         Text(
@@ -59,108 +78,145 @@ fun DiarizationPlot(
             modifier = Modifier.padding(bottom = 4.dp),
         )
 
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(totalHeight)
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.surface),
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val canvasW = size.width
-                val canvasH = size.height
-                val rowH = (canvasH - axisHeight.toPx()) / numSpeakers
-                val plotW = canvasW - labelWidth.toPx()
+            // 전체 캔버스 너비 = windowSec 1개 = 화면 1폭
+            val canvasWidthDp = maxWidth * (totalDuration / windowSec)
 
-                // 표시 시간 범위
-                val endTime = max(processedSec, windowSec)
-                val startTime = max(0f, endTime - windowSec)
+            Box(modifier = Modifier.horizontalScroll(scrollState)) {
+                // onSeek: 탭(짧은 터치)으로만 커서 이동, 드래그는 horizontalScroll에 위임
+                val labelWidthPx = with(density) { labelWidth.toPx() }
+                val seekModifier = if (onSeek != null) {
+                    Modifier.pointerInput(totalDuration) {
+                        detectTapGestures { offset ->
+                            val plotPx = size.width - labelWidthPx
+                            val timeSec = ((offset.x - labelWidthPx) / plotPx * totalDuration)
+                                .coerceIn(0f, totalDuration)
+                            onSeek(timeSec)
+                        }
+                    }
+                } else Modifier
 
-                fun timeToX(sec: Float): Float =
-                    labelWidth.toPx() + (sec - startTime) / windowSec * plotW
+                Canvas(
+                    modifier = Modifier
+                        .width(canvasWidthDp)
+                        .fillMaxHeight()
+                        .then(seekModifier),
+                ) {
+                    val canvasW = size.width
+                    val canvasH = size.height
+                    val rowH = (canvasH - axisHeight.toPx()) / numSpeakers
+                    val labelW = labelWidth.toPx()
+                    val plotW = canvasW - labelW
+                    val pxPerSec = plotW / totalDuration
 
-                // ── 그리드 및 시간 축 ──────────────────────────────────────
-                val tickInterval = if (windowSec <= 30f) 5f else 10f
-                val firstTick = ceil(startTime / tickInterval) * tickInterval
-                var t = firstTick
-                while (t <= endTime + 0.01f) {
-                    val x = timeToX(t)
-                    // 그리드 선
+                    fun timeToX(sec: Float) = labelW + sec * pxPerSec
+
+                    // ── 그리드 및 시간 축 ──────────────────────────────────
+                    val tickInterval = when {
+                        totalDuration <= 60f  -> 5f
+                        totalDuration <= 300f -> 10f
+                        else                  -> 30f
+                    }
+                    var t = 0f
+                    while (t <= totalDuration + 0.01f) {
+                        val x = timeToX(t)
+                        drawLine(
+                            color = gridColor,
+                            start = Offset(x, 0f),
+                            end = Offset(x, canvasH - axisHeight.toPx()),
+                            strokeWidth = 1f,
+                        )
+                        val label = formatTimeSec(t)
+                        val measured = textMeasurer.measure(
+                            text = label,
+                            style = TextStyle(
+                                fontSize = 9.sp,
+                                color = labelColor,
+                                fontFamily = FontFamily.Monospace,
+                            ),
+                        )
+                        drawText(
+                            textLayoutResult = measured,
+                            topLeft = Offset(
+                                x - measured.size.width / 2f,
+                                canvasH - axisHeight.toPx() + 4f,
+                            ),
+                        )
+                        t += tickInterval
+                    }
+
+                    // 축 구분선
                     drawLine(
                         color = gridColor,
-                        start = Offset(x, 0f),
-                        end = Offset(x, canvasH - axisHeight.toPx()),
+                        start = Offset(labelW, canvasH - axisHeight.toPx()),
+                        end = Offset(canvasW, canvasH - axisHeight.toPx()),
                         strokeWidth = 1f,
                     )
-                    // 시간 레이블
-                    val label = formatTimeSec(t)
-                    val measured = textMeasurer.measure(
-                        text = label,
-                        style = TextStyle(fontSize = 9.sp, color = labelColor, fontFamily = FontFamily.Monospace),
-                    )
-                    drawText(
-                        textLayoutResult = measured,
-                        topLeft = Offset(x - measured.size.width / 2f, canvasH - axisHeight.toPx() + 4f),
-                    )
-                    t += tickInterval
-                }
 
-                // 축 구분선
-                drawLine(
-                    color = gridColor,
-                    start = Offset(labelWidth.toPx(), canvasH - axisHeight.toPx()),
-                    end = Offset(canvasW, canvasH - axisHeight.toPx()),
-                    strokeWidth = 1f,
-                )
+                    // ── 화자 행 ───────────────────────────────────────────
+                    speakerIds.forEachIndexed { rowIdx, speakerId ->
+                        val rowTop = rowIdx * rowH
+                        val barTop = rowTop + rowH * 0.15f
+                        val barH = rowH * 0.7f
+                        val color = speakerColor(speakerId)
 
-                // ── 화자 행 ───────────────────────────────────────────────
-                speakerIds.forEachIndexed { rowIdx, speakerId ->
-                    val rowTop = rowIdx * rowH
-                    val barTop = rowTop + rowH * 0.15f
-                    val barH = rowH * 0.7f
-                    val color = speakerColor(speakerId)
+                        val labelText = "화자 ${speakerId + 1}"
+                        val measured = textMeasurer.measure(
+                            text = labelText,
+                            style = TextStyle(fontSize = 9.sp, color = color),
+                        )
+                        drawText(
+                            textLayoutResult = measured,
+                            topLeft = Offset(4f, rowTop + (rowH - measured.size.height) / 2f),
+                        )
 
-                    // 화자 레이블
-                    val label = "화자 ${speakerId + 1}"
-                    val measured = textMeasurer.measure(
-                        text = label,
-                        style = TextStyle(fontSize = 9.sp, color = color, fontFamily = FontFamily.Default),
-                    )
-                    drawText(
-                        textLayoutResult = measured,
-                        topLeft = Offset(4f, rowTop + (rowH - measured.size.height) / 2f),
-                    )
-
-                    // 발화 블록 그리기
-                    turns
-                        .filter { it.speakerId == speakerId }
-                        .forEach { turn ->
-                            val xStart = timeToX(turn.startSec).coerceIn(labelWidth.toPx(), canvasW)
-                            val xEnd = timeToX(turn.endSec).coerceIn(labelWidth.toPx(), canvasW)
-                            if (xEnd > xStart) {
-                                drawRect(
-                                    color = color.copy(alpha = 0.85f),
-                                    topLeft = Offset(xStart, barTop),
-                                    size = Size(xEnd - xStart, barH),
-                                )
+                        turns
+                            .filter { it.speakerId == speakerId }
+                            .forEach { turn ->
+                                val xStart = timeToX(turn.startSec).coerceIn(labelW, canvasW)
+                                val xEnd = timeToX(turn.endSec).coerceIn(labelW, canvasW)
+                                if (xEnd > xStart) {
+                                    drawRect(
+                                        color = color.copy(alpha = 0.85f),
+                                        topLeft = Offset(xStart, barTop),
+                                        size = Size(xEnd - xStart, barH),
+                                    )
+                                }
                             }
-                        }
-                }
+                    }
 
-                // 화자가 없을 때 안내 텍스트
-                if (speakerIds.isEmpty()) {
-                    val msg = "발화 감지 대기 중..."
-                    val measured = textMeasurer.measure(
-                        text = msg,
-                        style = TextStyle(fontSize = 11.sp, color = labelColor),
-                    )
-                    drawText(
-                        textLayoutResult = measured,
-                        topLeft = Offset(
-                            labelWidth.toPx() + (plotW - measured.size.width) / 2f,
-                            (canvasH - axisHeight.toPx() - measured.size.height) / 2f,
-                        ),
-                    )
+                    // ── 재생 커서 ─────────────────────────────────────────
+                    if (currentPositionSec >= 0f) {
+                        val cx = timeToX(currentPositionSec).coerceIn(labelW, canvasW)
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.9f),
+                            start = Offset(cx, 0f),
+                            end = Offset(cx, canvasH - axisHeight.toPx()),
+                            strokeWidth = 2f,
+                        )
+                    }
+
+                    // ── 화자 없을 때 안내 ──────────────────────────────────
+                    if (speakerIds.isEmpty()) {
+                        val msg = "발화 감지 대기 중..."
+                        val measured = textMeasurer.measure(
+                            text = msg,
+                            style = TextStyle(fontSize = 11.sp, color = labelColor),
+                        )
+                        drawText(
+                            textLayoutResult = measured,
+                            topLeft = Offset(
+                                labelW + (plotW - measured.size.width) / 2f,
+                                (canvasH - axisHeight.toPx() - measured.size.height) / 2f,
+                            ),
+                        )
+                    }
                 }
             }
         }

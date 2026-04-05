@@ -8,15 +8,21 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.diart.android.audio.AudioCapturer
 import com.diart.android.audio.SlidingWindowBuffer
+import com.diart.android.audio.WavWriter
+import com.diart.android.data.RecordingInfo
+import com.diart.android.data.RecordingRepository
 import com.diart.android.pipeline.DiarizationPipeline
 import com.diart.android.pipeline.SpeakerTurn
-import com.diart.android.SettingsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.Collections
 
 private const val TAG = "DiartVM"
 
@@ -45,8 +51,30 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
     private val _settings = MutableStateFlow(SettingsState())
     val settings: StateFlow<SettingsState> = _settings
 
+    // ── 네비게이션 상태 ────────────────────────────────────────────────────
+
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings
+
+    private val _showRecordingList = MutableStateFlow(false)
+    val showRecordingList: StateFlow<Boolean> = _showRecordingList
+
+    private val _showPlayback = MutableStateFlow(false)
+    val showPlayback: StateFlow<Boolean> = _showPlayback
+
+    // ── 재생 / 저장 목록 상태 ──────────────────────────────────────────────
+
+    private val _playbackFile = MutableStateFlow<File?>(null)
+    val playbackFile: StateFlow<File?> = _playbackFile
+
+    private val _playbackTurns = MutableStateFlow<List<SpeakerTurn>>(emptyList())
+    val playbackTurns: StateFlow<List<SpeakerTurn>> = _playbackTurns
+
+    private val _totalRecordedSec = MutableStateFlow(0f)
+    val totalRecordedSec: StateFlow<Float> = _totalRecordedSec
+
+    private val _recordings = MutableStateFlow<List<RecordingInfo>>(emptyList())
+    val recordings: StateFlow<List<RecordingInfo>> = _recordings
 
     // ── 내부 컴포넌트 ──────────────────────────────────────────────────────
 
@@ -55,15 +83,19 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
     private var pipeline: DiarizationPipeline? = null
     private var slidingWindow: SlidingWindowBuffer? = null
 
-    // 청크 큐: capacity=1 → 처리 중이면 이전 청크를 버리고 최신 청크만 유지
     private val chunkChannel = Channel<Pair<FloatArray, Float>>(capacity = Channel.CONFLATED)
     private var inferenceJob: Job? = null
-
     private var elapsedSec = 0f
+
+    private val pcmBuffer = ByteArrayOutputStream()
+    private val allTurns = Collections.synchronizedList(mutableListOf<SpeakerTurn>())
 
     init {
         loadModels()
+        refreshRecordings()
     }
+
+    // ── 모델 로드 ──────────────────────────────────────────────────────────
 
     private fun loadModels() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -78,21 +110,23 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    // ── 화자 분리 시작 / 중지 ─────────────────────────────────────────────
+
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun startDiarization() {
-        val p = pipeline ?: run {
-            Log.e(TAG, "startDiarization called but pipeline is null!")
-            return
-        }
+        val p = pipeline ?: return
         _isRunning.value = true
         elapsedSec = 0f
         _processedSec.value = 0f
         _recentTurns.value = emptyList()
         _activeSpeaker.value = -1
         _statusMessage.value = "화자 분리 중..."
+        _showPlayback.value = false
         p.reset()
 
-        // 단일 추론 코루틴: 순차 처리로 ONNX 경합 방지
+        pcmBuffer.reset()
+        allTurns.clear()
+
         inferenceJob = viewModelScope.launch(Dispatchers.Default) {
             for ((waveform, chunkStart) in chunkChannel) {
                 try {
@@ -107,10 +141,11 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
                     _activeSpeaker.value = latestTurn?.speakerId ?: -1
 
                     if (result.turns.isNotEmpty()) {
+                        allTurns.addAll(result.turns)
                         _recentTurns.value = (_recentTurns.value + result.turns).takeLast(200)
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Inference error at chunk=${chunkChannel}", e)
+                    Log.e(TAG, "Inference error", e)
                     _statusMessage.value = "추론 오류: ${e.message}"
                 }
             }
@@ -125,12 +160,45 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
             }
         )
 
-        Log.d(TAG, "Starting audio capture")
         audioCapturer.start { frames ->
+            val pcm = WavWriter.floatToPcm16(frames)
+            synchronized(pcmBuffer) { pcmBuffer.write(pcm) }
             slidingWindow?.push(frames)
         }
-        Log.d(TAG, "Audio capture started")
     }
+
+    fun stopDiarization() {
+        audioCapturer.stop()
+        slidingWindow?.reset()
+        inferenceJob?.cancel()
+        inferenceJob = null
+        _isRunning.value = false
+        _activeSpeaker.value = -1
+        _statusMessage.value = "저장 중..."
+
+        val totalSec = _processedSec.value
+        val turns = allTurns.toList()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                delay(100)
+                val pcm = synchronized(pcmBuffer) { pcmBuffer.toByteArray() }
+                val info = RecordingRepository.save(context, pcm, turns, totalSec, audioCapturer.sampleRate)
+                Log.d(TAG, "Saved recording: ${info.id}, ${pcm.size / 1024}KB, ${turns.size} turns")
+
+                _recordings.value = RecordingRepository.loadAll(context)
+                _playbackFile.value = info.wavFile
+                _playbackTurns.value = turns
+                _totalRecordedSec.value = totalSec
+                _showPlayback.value = true
+            } catch (e: Exception) {
+                Log.e(TAG, "Save failed", e)
+                _statusMessage.value = "저장 실패: ${e.message}"
+            }
+        }
+    }
+
+    // ── 설정 ──────────────────────────────────────────────────────────────
 
     fun openSettings() { _showSettings.value = true }
     fun closeSettings() { _showSettings.value = false }
@@ -148,14 +216,36 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
         _showSettings.value = false
     }
 
-    fun stopDiarization() {
-        audioCapturer.stop()
-        slidingWindow?.reset()
-        inferenceJob?.cancel()
-        inferenceJob = null
-        _isRunning.value = false
-        _activeSpeaker.value = -1
-        _statusMessage.value = "중지됨. 총 ${_processedSec.value.toInt()}초 처리."
+    // ── 재생 ──────────────────────────────────────────────────────────────
+
+    fun closePlayback() { _showPlayback.value = false }
+
+    fun playRecording(info: RecordingInfo) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val turns = RecordingRepository.loadTurns(info.turnsFile)
+            _playbackFile.value = info.wavFile
+            _playbackTurns.value = turns
+            _totalRecordedSec.value = info.durationSec
+            _showPlayback.value = true
+        }
+    }
+
+    // ── 저장 목록 ─────────────────────────────────────────────────────────
+
+    fun openRecordingList() { _showRecordingList.value = true }
+    fun closeRecordingList() { _showRecordingList.value = false }
+
+    fun deleteRecording(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            RecordingRepository.delete(context, id)
+            _recordings.value = RecordingRepository.loadAll(context)
+        }
+    }
+
+    private fun refreshRecordings() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _recordings.value = RecordingRepository.loadAll(context)
+        }
     }
 
     override fun onCleared() {

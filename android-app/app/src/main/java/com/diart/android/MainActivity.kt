@@ -9,12 +9,14 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import com.diart.android.ui.DiarizationScreen
+import com.diart.android.ui.PlaybackScreen
+import com.diart.android.ui.RecordingListScreen
 import com.diart.android.ui.SettingsScreen
 import com.diart.android.ui.theme.DiartTheme
 
@@ -38,17 +40,41 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    val showSettings by vm.showSettings.collectAsState()
-                    val settings by vm.settings.collectAsState()
+                    val showPlayback      by vm.showPlayback.collectAsState()
+                    val showRecordingList by vm.showRecordingList.collectAsState()
+                    val showSettings      by vm.showSettings.collectAsState()
+                    val settings          by vm.settings.collectAsState()
+                    val playbackFile      by vm.playbackFile.collectAsState()
+                    val playbackTurns     by vm.playbackTurns.collectAsState()
+                    val totalRecordedSec  by vm.totalRecordedSec.collectAsState()
+                    val recordings        by vm.recordings.collectAsState()
 
-                    if (showSettings) {
-                        SettingsScreen(
-                            current = settings,
-                            onApply = { vm.applySettings(it) },
-                            onBack = { vm.closeSettings() },
-                        )
-                    } else {
-                        DiarizationScreen(vm = vm)
+                    when {
+                        showPlayback && playbackFile != null ->
+                            PlaybackScreen(
+                                audioFile       = playbackFile!!,
+                                turns           = playbackTurns,
+                                totalDurationSec = totalRecordedSec,
+                                onBack          = { vm.closePlayback() },
+                            )
+
+                        showRecordingList ->
+                            RecordingListScreen(
+                                recordings = recordings,
+                                onPlay     = { vm.playRecording(it) },
+                                onDelete   = { vm.deleteRecording(it) },
+                                onBack     = { vm.closeRecordingList() },
+                            )
+
+                        showSettings ->
+                            SettingsScreen(
+                                current  = settings,
+                                onApply  = { vm.applySettings(it) },
+                                onBack   = { vm.closeSettings() },
+                            )
+
+                        else ->
+                            DiarizationScreen(vm = vm)
                     }
                 }
             }

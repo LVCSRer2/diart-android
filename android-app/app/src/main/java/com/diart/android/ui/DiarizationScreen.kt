@@ -41,6 +41,9 @@ fun DiarizationScreen(vm: DiarizationViewModel) {
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
+            TextButton(onClick = { vm.openRecordingList() }) {
+                Text("목록 ≡", fontSize = 14.sp)
+            }
             TextButton(onClick = { vm.openSettings() }) {
                 Text("설정 ⚙", fontSize = 14.sp)
             }
