@@ -137,8 +137,8 @@ fun PlaybackScreen(
 
         Spacer(Modifier.height(8.dp))
 
-        // AHC 재분석 슬라이더 (segments 있을 때만)
-        if (segments.isNotEmpty()) {
+        // AHC 재분석 슬라이더 (정밀 모드이고 segments 있을 때만)
+        if (showRefined && segments.isNotEmpty()) {
             AhcSection(
                 threshold = ahcThreshold,
                 isAnalyzing = isReAnalyzing,
