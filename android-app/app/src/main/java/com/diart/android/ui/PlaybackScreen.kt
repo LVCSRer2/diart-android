@@ -41,8 +41,11 @@ fun PlaybackScreen(
     // AHC threshold 슬라이더 상태
     var ahcThreshold by remember(initialAhcThreshold) { mutableFloatStateOf(initialAhcThreshold) }
 
-    // 표시할 turns: 정밀 결과 우선
-    val displayTurns = refinedTurns ?: turns
+    // 온라인/정밀 토글 (정밀 결과가 있을 때만 의미 있음)
+    var showRefined by remember { mutableStateOf(refinedTurns != null) }
+    // 재분석 완료 시 자동으로 정밀 모드로 전환
+    LaunchedEffect(refinedTurns) { if (refinedTurns != null) showRefined = true }
+    val displayTurns = if (showRefined && refinedTurns != null) refinedTurns else turns
 
     // MediaPlayer 초기화
     DisposableEffect(audioFile) {
@@ -95,7 +98,18 @@ fun PlaybackScreen(
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.weight(1f))
-            Spacer(Modifier.width(64.dp))
+            if (refinedTurns != null) {
+                TextButton(onClick = { showRefined = !showRefined }) {
+                    Text(
+                        text = if (showRefined) "정밀" else "온라인",
+                        fontSize = 12.sp,
+                        color = if (showRefined) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                Spacer(Modifier.width(64.dp))
+            }
         }
 
         Spacer(Modifier.height(8.dp))
