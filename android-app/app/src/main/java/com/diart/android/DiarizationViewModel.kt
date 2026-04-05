@@ -12,7 +12,9 @@ import com.diart.android.audio.WavWriter
 import com.diart.android.data.RecordingInfo
 import com.diart.android.data.RecordingRepository
 import com.diart.android.pipeline.DiarizationPipeline
+import com.diart.android.pipeline.SegmentEntry
 import com.diart.android.pipeline.SpeakerTurn
+import com.diart.android.pipeline.remapTurnsWithAHC
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -72,6 +74,12 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
 
     private val _refinedPlaybackTurns = MutableStateFlow<List<SpeakerTurn>?>(null)
     val refinedPlaybackTurns: StateFlow<List<SpeakerTurn>?> = _refinedPlaybackTurns
+
+    private val _playbackSegments = MutableStateFlow<List<SegmentEntry>>(emptyList())
+    val playbackSegments: StateFlow<List<SegmentEntry>> = _playbackSegments
+
+    private val _isReAnalyzing = MutableStateFlow(false)
+    val isReAnalyzing: StateFlow<Boolean> = _isReAnalyzing
 
     private val _totalRecordedSec = MutableStateFlow(0f)
     val totalRecordedSec: StateFlow<Float> = _totalRecordedSec
@@ -179,42 +187,50 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
         _activeSpeaker.value = -1
         _statusMessage.value = "저장 중..."
 
-        val totalSec  = _processedSec.value
-        val turns     = allTurns.toList()
-        val p         = pipeline
+        val totalSec = _processedSec.value
+        val turns    = allTurns.toList()
+        val segs     = pipeline?.collectedSegments ?: emptyList()
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 delay(100)
                 val pcm = synchronized(pcmBuffer) { pcmBuffer.toByteArray() }
 
-                // AHC 오프라인 정밀 분석
-                val refinedTurns: List<SpeakerTurn>? = if (p != null && p.collectedSegmentCount >= 2) {
-                    _statusMessage.value = "정밀 분석 중... (${p.collectedSegmentCount}개 세그먼트)"
-                    try {
-                        val result = p.refineWithAHC(_settings.value.ahcThreshold, turns)
-                        Log.d(TAG, "AHC refined: ${result.size} turns, ${result.map { it.speakerId }.toSet().size} speakers")
-                        result
-                    } catch (e: Exception) {
-                        Log.e(TAG, "AHC failed", e)
-                        null
-                    }
-                } else null
-
-                val info = RecordingRepository.save(context, pcm, turns, refinedTurns, totalSec, audioCapturer.sampleRate)
-                Log.d(TAG, "Saved recording: ${info.id}, ${pcm.size / 1024}KB, ${turns.size} turns")
+                val info = RecordingRepository.save(context, pcm, turns, segs, totalSec, audioCapturer.sampleRate)
+                Log.d(TAG, "Saved: ${info.id}, ${pcm.size / 1024}KB, ${turns.size} turns, ${segs.size} segments")
 
                 _recordings.value = RecordingRepository.loadAll(context)
                 _playbackFile.value = info.wavFile
                 _playbackTurns.value = turns
-                _refinedPlaybackTurns.value = refinedTurns
+                _playbackSegments.value = segs
                 _totalRecordedSec.value = totalSec
-                _statusMessage.value = if (refinedTurns != null) "정밀 분석 완료" else "저장 완료"
+
+                // 초기 AHC 분석
+                if (segs.size >= 2) {
+                    _statusMessage.value = "정밀 분석 중..."
+                    _refinedPlaybackTurns.value = remapTurnsWithAHC(_settings.value.ahcThreshold, segs, turns)
+                } else {
+                    _refinedPlaybackTurns.value = null
+                }
+                _statusMessage.value = "저장 완료"
                 _showPlayback.value = true
             } catch (e: Exception) {
                 Log.e(TAG, "Save failed", e)
                 _statusMessage.value = "저장 실패: ${e.message}"
             }
+        }
+    }
+
+    // ── AHC 재분석 ────────────────────────────────────────────────────────
+
+    fun reAnalyze(threshold: Float) {
+        val segs  = _playbackSegments.value
+        val turns = _playbackTurns.value
+        if (segs.size < 2) return
+        viewModelScope.launch(Dispatchers.Default) {
+            _isReAnalyzing.value = true
+            _refinedPlaybackTurns.value = remapTurnsWithAHC(threshold, segs, turns)
+            _isReAnalyzing.value = false
         }
     }
 
@@ -226,11 +242,11 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
     fun applySettings(s: SettingsState) {
         _settings.value = s
         pipeline?.apply {
-            tauActive = s.tauActive
-            deltaNow = s.deltaNow
-            rhoUpdate = s.rhoUpdate
-            gamma = s.gamma
-            beta = s.beta
+            tauActive   = s.tauActive
+            deltaNow    = s.deltaNow
+            rhoUpdate   = s.rhoUpdate
+            gamma       = s.gamma
+            beta        = s.beta
             maxSpeakers = s.maxSpeakers
         }
         _showSettings.value = false
@@ -242,12 +258,15 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun playRecording(info: RecordingInfo) {
         viewModelScope.launch(Dispatchers.IO) {
-            val turns        = RecordingRepository.loadTurns(info.turnsFile)
-            val refinedTurns = info.refinedTurnsFile?.let { RecordingRepository.loadTurns(it) }
+            val turns = RecordingRepository.loadTurns(info.turnsFile)
+            val segs  = info.segmentsFile?.let { RecordingRepository.loadSegments(it) } ?: emptyList()
             _playbackFile.value = info.wavFile
             _playbackTurns.value = turns
-            _refinedPlaybackTurns.value = refinedTurns
+            _playbackSegments.value = segs
             _totalRecordedSec.value = info.durationSec
+            _refinedPlaybackTurns.value = if (segs.size >= 2) {
+                remapTurnsWithAHC(_settings.value.ahcThreshold, segs, turns)
+            } else null
             _showPlayback.value = true
         }
     }

@@ -97,3 +97,23 @@ data class SegmentEntry(
     val endSec: Float,
     val embedding: FloatArray,
 )
+
+/**
+ * AHC로 segments를 클러스터링한 뒤, onlineTurns의 경계를 유지하면서
+ * 화자 ID만 전역 최적값으로 교체합니다.
+ */
+fun remapTurnsWithAHC(
+    threshold: Float,
+    segments: List<SegmentEntry>,
+    onlineTurns: List<SpeakerTurn>,
+): List<SpeakerTurn> {
+    if (segments.size < 2 || onlineTurns.isEmpty()) return onlineTurns
+    val clusterIds = AHCSpeakerClustering(threshold).clusterAssign(segments)
+    return onlineTurns.map { turn ->
+        val bestIdx = segments.indices.maxByOrNull { i ->
+            val seg = segments[i]
+            maxOf(0f, minOf(turn.endSec, seg.endSec) - maxOf(turn.startSec, seg.startSec))
+        } ?: return@map turn
+        turn.copy(speakerId = clusterIds[bestIdx])
+    }
+}

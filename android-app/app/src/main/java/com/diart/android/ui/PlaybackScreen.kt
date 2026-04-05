@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.diart.android.pipeline.SegmentEntry
 import com.diart.android.pipeline.SpeakerTurn
 import com.diart.android.ui.theme.speakerColor
 import kotlinx.coroutines.delay
@@ -24,6 +25,10 @@ fun PlaybackScreen(
     audioFile: File,
     turns: List<SpeakerTurn>,
     refinedTurns: List<SpeakerTurn>?,
+    segments: List<SegmentEntry>,
+    isReAnalyzing: Boolean,
+    initialAhcThreshold: Float,
+    onReAnalyze: (Float) -> Unit,
     totalDurationSec: Float,
     onBack: () -> Unit,
 ) {
@@ -32,9 +37,12 @@ fun PlaybackScreen(
     var currentPositionSec by remember { mutableFloatStateOf(0f) }
     var duration by remember { mutableFloatStateOf(max(totalDurationSec, 1f)) }
     var prepared by remember { mutableStateOf(false) }
-    // 온라인 결과 / 정밀(AHC) 결과 토글
-    var showRefined by remember(refinedTurns) { mutableStateOf(refinedTurns != null) }
-    val displayTurns = if (showRefined && refinedTurns != null) refinedTurns else turns
+
+    // AHC threshold 슬라이더 상태
+    var ahcThreshold by remember(initialAhcThreshold) { mutableFloatStateOf(initialAhcThreshold) }
+
+    // 표시할 turns: 정밀 결과 우선
+    val displayTurns = refinedTurns ?: turns
 
     // MediaPlayer 초기화
     DisposableEffect(audioFile) {
@@ -46,12 +54,8 @@ fun PlaybackScreen(
         } catch (e: Exception) {
             prepared = false
         }
-        mediaPlayer.setOnCompletionListener {
-            isPlaying = false
-        }
-        onDispose {
-            mediaPlayer.release()
-        }
+        mediaPlayer.setOnCompletionListener { isPlaying = false }
+        onDispose { mediaPlayer.release() }
     }
 
     // 재생 위치 폴링
@@ -91,19 +95,7 @@ fun PlaybackScreen(
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.weight(1f))
-            // 정밀 분석 결과가 있을 때만 토글 표시
-            if (refinedTurns != null) {
-                TextButton(onClick = { showRefined = !showRefined }) {
-                    Text(
-                        text = if (showRefined) "정밀" else "온라인",
-                        fontSize = 12.sp,
-                        color = if (showRefined) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                Spacer(Modifier.width(64.dp))
-            }
+            Spacer(Modifier.width(64.dp))
         }
 
         Spacer(Modifier.height(8.dp))
@@ -114,7 +106,7 @@ fun PlaybackScreen(
         PlaybackSpeakerCard(activeSpeaker, isPlaying)
         Spacer(Modifier.height(12.dp))
 
-        // 타임라인 플롯 (전체 녹음 + 커서)
+        // 타임라인 플롯
         DiarizationPlot(
             turns = displayTurns,
             processedSec = duration,
@@ -129,7 +121,18 @@ fun PlaybackScreen(
                 .weight(1f),
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
+
+        // AHC 재분석 슬라이더 (segments 있을 때만)
+        if (segments.isNotEmpty()) {
+            AhcSection(
+                threshold = ahcThreshold,
+                isAnalyzing = isReAnalyzing,
+                onThresholdChange = { ahcThreshold = it },
+                onReAnalyze = { onReAnalyze(ahcThreshold) },
+            )
+            Spacer(Modifier.height(8.dp))
+        }
 
         // 시간 표시
         Row(
@@ -163,13 +166,12 @@ fun PlaybackScreen(
 
         Spacer(Modifier.height(8.dp))
 
-        // 재생/일시정지 버튼
+        // 재생 컨트롤
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 10초 뒤로
             FilledTonalIconButton(
                 onClick = {
                     val pos = (currentPositionSec - 10f).coerceAtLeast(0f)
@@ -181,20 +183,16 @@ fun PlaybackScreen(
 
             Spacer(Modifier.width(16.dp))
 
-            // 재생/일시정지
             Button(
                 onClick = {
                     if (!prepared) return@Button
                     if (isPlaying) {
-                        mediaPlayer.pause()
-                        isPlaying = false
+                        mediaPlayer.pause(); isPlaying = false
                     } else {
                         if (currentPositionSec >= duration - 0.1f) {
-                            mediaPlayer.seekTo(0)
-                            currentPositionSec = 0f
+                            mediaPlayer.seekTo(0); currentPositionSec = 0f
                         }
-                        mediaPlayer.start()
-                        isPlaying = true
+                        mediaPlayer.start(); isPlaying = true
                     }
                 },
                 enabled = prepared,
@@ -202,15 +200,11 @@ fun PlaybackScreen(
                 shape = CircleShape,
                 contentPadding = PaddingValues(0.dp),
             ) {
-                Text(
-                    text = if (isPlaying) "⏸" else "▶",
-                    fontSize = 24.sp,
-                )
+                Text(text = if (isPlaying) "⏸" else "▶", fontSize = 24.sp)
             }
 
             Spacer(Modifier.width(16.dp))
 
-            // 10초 앞으로
             FilledTonalIconButton(
                 onClick = {
                     val pos = (currentPositionSec + 10f).coerceAtMost(duration)
@@ -237,6 +231,65 @@ fun PlaybackScreen(
 }
 
 @Composable
+private fun AhcSection(
+    threshold: Float,
+    isAnalyzing: Boolean,
+    onThresholdChange: (Float) -> Unit,
+    onReAnalyze: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "정밀 분석 (AHC)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = "낮을수록 화자 구분이 세밀해짐",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = "%.2f".format(threshold),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                FilledTonalButton(
+                    onClick = onReAnalyze,
+                    enabled = !isAnalyzing,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    if (isAnalyzing) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("재분석", fontSize = 12.sp)
+                    }
+                }
+            }
+            Slider(
+                value = threshold,
+                onValueChange = onThresholdChange,
+                valueRange = 0.1f..0.8f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
 private fun PlaybackSpeakerCard(speakerId: Int, isPlaying: Boolean) {
     val color = if (speakerId >= 0) speakerColor(speakerId) else Color.Gray
     Surface(
@@ -250,11 +303,8 @@ private fun PlaybackSpeakerCard(speakerId: Int, isPlaying: Boolean) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Surface(
-                modifier = Modifier.size(12.dp),
-                shape = CircleShape,
-                color = if (speakerId >= 0) color else Color.Gray,
-            ) {}
+            Surface(modifier = Modifier.size(12.dp), shape = CircleShape,
+                color = if (speakerId >= 0) color else Color.Gray) {}
             Text(
                 text = if (speakerId >= 0) "발화 중: 화자 ${speakerId + 1}"
                        else if (isPlaying) "침묵 구간"
@@ -269,10 +319,7 @@ private fun PlaybackSpeakerCard(speakerId: Int, isPlaying: Boolean) {
 
 @Composable
 private fun StatChip(text: String) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),

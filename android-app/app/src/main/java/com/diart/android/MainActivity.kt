@@ -47,17 +47,23 @@ class MainActivity : ComponentActivity() {
                     val playbackFile         by vm.playbackFile.collectAsState()
                     val playbackTurns        by vm.playbackTurns.collectAsState()
                     val refinedPlaybackTurns by vm.refinedPlaybackTurns.collectAsState()
+                    val playbackSegments     by vm.playbackSegments.collectAsState()
+                    val isReAnalyzing        by vm.isReAnalyzing.collectAsState()
                     val totalRecordedSec     by vm.totalRecordedSec.collectAsState()
                     val recordings           by vm.recordings.collectAsState()
 
                     when {
                         showPlayback && playbackFile != null ->
                             PlaybackScreen(
-                                audioFile        = playbackFile!!,
-                                turns            = playbackTurns,
-                                refinedTurns     = refinedPlaybackTurns,
-                                totalDurationSec = totalRecordedSec,
-                                onBack           = { vm.closePlayback() },
+                                audioFile           = playbackFile!!,
+                                turns               = playbackTurns,
+                                refinedTurns        = refinedPlaybackTurns,
+                                segments            = playbackSegments,
+                                isReAnalyzing       = isReAnalyzing,
+                                initialAhcThreshold = settings.ahcThreshold,
+                                onReAnalyze         = { vm.reAnalyze(it) },
+                                totalDurationSec    = totalRecordedSec,
+                                onBack              = { vm.closePlayback() },
                             )
 
                         showRecordingList ->
