@@ -235,7 +235,7 @@ private fun AhcSection(
     threshold: Float,
     isAnalyzing: Boolean,
     onThresholdChange: (Float) -> Unit,
-    onReAnalyze: () -> Unit,
+    onReAnalyze: () -> Unit,   // 슬라이더에서 손을 뗄 때 호출
 ) {
     Surface(
         shape = RoundedCornerShape(10.dp),
@@ -266,22 +266,14 @@ private fun AhcSection(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(start = 8.dp),
                 )
-                Spacer(Modifier.width(8.dp))
-                FilledTonalButton(
-                    onClick = onReAnalyze,
-                    enabled = !isAnalyzing,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                ) {
                     if (isAnalyzing) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text("재분석", fontSize = 12.sp)
-                    }
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp).padding(start = 8.dp), strokeWidth = 2.dp)
                 }
             }
             Slider(
                 value = threshold,
                 onValueChange = onThresholdChange,
+                onValueChangeFinished = onReAnalyze,
                 valueRange = 0.1f..0.8f,
                 modifier = Modifier.fillMaxWidth(),
             )
