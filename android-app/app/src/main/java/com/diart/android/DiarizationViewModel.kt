@@ -192,7 +192,7 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
                 val refinedTurns: List<SpeakerTurn>? = if (p != null && p.collectedSegmentCount >= 2) {
                     _statusMessage.value = "정밀 분석 중... (${p.collectedSegmentCount}개 세그먼트)"
                     try {
-                        val result = p.refineWithAHC(_settings.value.ahcThreshold)
+                        val result = p.refineWithAHC(_settings.value.ahcThreshold, turns)
                         Log.d(TAG, "AHC refined: ${result.size} turns, ${result.map { it.speakerId }.toSet().size} speakers")
                         result
                     } catch (e: Exception) {

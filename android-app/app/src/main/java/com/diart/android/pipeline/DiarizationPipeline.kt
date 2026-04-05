@@ -161,14 +161,29 @@ class DiarizationPipeline(
 
     private val collectedSegments = mutableListOf<SegmentEntry>()
     private var chunkCount = 0
-    private val COLLECT_INTERVAL = 10  // 0.5s 스텝 × 10 = 5초마다 1회 수집
+    private val COLLECT_INTERVAL = 4  // 0.5s × 4 = 2초마다 1회 수집
 
     /**
-     * 수집된 임베딩 전체에 AHC를 적용해 정제된 화자 분리 결과를 반환합니다.
-     * 녹음 완료 후 호출하세요.
+     * 수집된 임베딩에 AHC를 적용해 onlineTurns의 구간 경계는 유지하면서
+     * 화자 ID만 전역 최적으로 재배정합니다. 녹음 완료 후 호출하세요.
      */
-    fun refineWithAHC(threshold: Float): List<SpeakerTurn> =
-        AHCSpeakerClustering(threshold).cluster(collectedSegments.toList())
+    fun refineWithAHC(threshold: Float, onlineTurns: List<SpeakerTurn>): List<SpeakerTurn> {
+        val segs = collectedSegments.toList()
+        if (segs.size < 2 || onlineTurns.isEmpty()) return onlineTurns
+
+        val clusterIds = AHCSpeakerClustering(threshold).clusterAssign(segs)
+
+        // 각 온라인 turn에 대해 시간 겹침이 가장 큰 SegmentEntry의 화자 ID를 배정
+        return onlineTurns.map { turn ->
+            val bestIdx = segs.indices.maxByOrNull { i ->
+                val seg = segs[i]
+                val overlapStart = maxOf(turn.startSec, seg.startSec)
+                val overlapEnd   = minOf(turn.endSec,   seg.endSec)
+                maxOf(0f, overlapEnd - overlapStart)
+            } ?: return@map turn
+            turn.copy(speakerId = clusterIds[bestIdx])
+        }
+    }
 
     val collectedSegmentCount: Int get() = collectedSegments.size
 

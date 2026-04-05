@@ -7,33 +7,34 @@ import kotlin.math.sqrt
  *
  * - Average linkage (합병 시 가중 평균 센트로이드)
  * - Cosine distance
- * - threshold 미만인 쌍을 반복 합병, 최종 클러스터 → SpeakerTurn 목록 반환
+ * - [clusterAssign]: 각 SegmentEntry에 새 화자 ID를 배정하는 IntArray 반환
+ *   → DiarizationPipeline이 온라인 SpeakerTurn의 경계는 유지하고 화자 ID만 교체하는 데 사용
  */
-class AHCSpeakerClustering(val threshold: Float = 0.5f) {
+class AHCSpeakerClustering(val threshold: Float = 0.35f) {
 
-    fun cluster(segments: List<SegmentEntry>): List<SpeakerTurn> {
-        if (segments.isEmpty()) return emptyList()
+    /**
+     * AHC를 실행하고 각 세그먼트의 화자 ID(IntArray)를 반환합니다.
+     * 화자 ID는 첫 등장 시간 순으로 0, 1, 2, ... 배정됩니다.
+     */
+    fun clusterAssign(segments: List<SegmentEntry>): IntArray {
         val n = segments.size
-        if (n == 1) return listOf(SpeakerTurn(0, segments[0].startSec, segments[0].endSec))
+        if (n == 0) return IntArray(0)
+        if (n == 1) return IntArray(1) { 0 }
 
-        // 클러스터 centroid (시작값: 각 세그먼트 임베딩)
         val centroids = Array(n) { segments[it].embedding.copyOf() }
         val sizes     = IntArray(n) { 1 }
         val active    = BooleanArray(n) { true }
         var numActive = n
 
-        // 거리 행렬 초기화
         val dist = Array(n) { i ->
             FloatArray(n) { j ->
                 if (i == j) Float.MAX_VALUE else cosineDistance(centroids[i], centroids[j])
             }
         }
 
-        // AHC: 최소 거리 쌍을 반복 합병
         while (numActive > 1) {
             var minD = Float.MAX_VALUE
             var mi = -1; var mj = -1
-
             for (i in 0 until n) {
                 if (!active[i]) continue
                 for (j in i + 1 until n) {
@@ -41,24 +42,17 @@ class AHCSpeakerClustering(val threshold: Float = 0.5f) {
                     if (dist[i][j] < minD) { minD = dist[i][j]; mi = i; mj = j }
                 }
             }
-
             if (minD >= threshold || mi < 0) break
 
-            // mj → mi 합병 (가중 평균 centroid)
-            val ni = sizes[mi].toFloat()
-            val nj = sizes[mj].toFloat()
-            val total = ni + nj
+            val ni = sizes[mi].toFloat(); val nj = sizes[mj].toFloat(); val total = ni + nj
             for (d in centroids[mi].indices) {
                 centroids[mi][d] = (centroids[mi][d] * ni + centroids[mj][d] * nj) / total
             }
             val norm = l2Norm(centroids[mi])
             if (norm > 1e-8f) for (d in centroids[mi].indices) centroids[mi][d] /= norm
 
-            sizes[mi] += sizes[mj]
-            active[mj] = false
-            numActive--
+            sizes[mi] += sizes[mj]; active[mj] = false; numActive--
 
-            // mi 관련 거리 갱신
             for (k in 0 until n) {
                 if (!active[k] || k == mi) continue
                 val d = cosineDistance(centroids[mi], centroids[k])
@@ -67,12 +61,12 @@ class AHCSpeakerClustering(val threshold: Float = 0.5f) {
         }
 
         // 각 세그먼트를 가장 가까운 활성 클러스터에 배정
-        val activeIdx   = (0 until n).filter { active[it] }
-        val segCluster  = IntArray(n) { i ->
+        val activeIdx  = (0 until n).filter { active[it] }
+        val segCluster = IntArray(n) { i ->
             activeIdx.minByOrNull { c -> cosineDistance(segments[i].embedding, centroids[c]) } ?: 0
         }
 
-        // 클러스터를 첫 등장 시간 순으로 정렬 → 화자 ID 0, 1, 2, ...
+        // 첫 등장 시간 순으로 화자 ID 0, 1, 2, ...
         val clusterFirstTime = activeIdx.associateWith { c ->
             (0 until n).filter { segCluster[it] == c }
                 .minOfOrNull { segments[it].startSec } ?: Float.MAX_VALUE
@@ -82,27 +76,7 @@ class AHCSpeakerClustering(val threshold: Float = 0.5f) {
             .withIndex()
             .associate { (idx, c) -> c to idx }
 
-        val rawTurns = (0 until n)
-            .map { SpeakerTurn(clusterToSpeaker[segCluster[it]]!!, segments[it].startSec, segments[it].endSec) }
-            .sortedBy { it.startSec }
-
-        return mergeTurns(rawTurns)
-    }
-
-    /** 같은 화자의 인접 구간을 하나로 병합 (gap ≤ 0.1s) */
-    private fun mergeTurns(turns: List<SpeakerTurn>): List<SpeakerTurn> {
-        if (turns.isEmpty()) return emptyList()
-        val result = mutableListOf<SpeakerTurn>()
-        var cur = turns[0]
-        for (t in turns.drop(1)) {
-            if (t.speakerId == cur.speakerId && t.startSec <= cur.endSec + 0.1f) {
-                cur = cur.copy(endSec = maxOf(cur.endSec, t.endSec))
-            } else {
-                result.add(cur); cur = t
-            }
-        }
-        result.add(cur)
-        return result
+        return IntArray(n) { clusterToSpeaker[segCluster[it]]!! }
     }
 
     private fun cosineDistance(a: FloatArray, b: FloatArray): Float {

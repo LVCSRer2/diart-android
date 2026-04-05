@@ -136,7 +136,7 @@ fun SettingsScreen(
             InfoCard(
                 "tauActive=0.4  deltaNow=0.40  rhoUpdate=0.10\n" +
                 "gamma=3.0  beta=10.0  maxSpeakers=20\n" +
-                "ahcThreshold=0.50"
+                "ahcThreshold=0.35"
             )
         }
 
