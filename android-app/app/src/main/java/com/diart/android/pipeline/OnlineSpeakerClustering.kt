@@ -19,7 +19,7 @@ class OnlineSpeakerClustering(
     var rhoUpdate: Float = 0.10f,
     var deltaNow: Float = 0.40f,
     var maxSpeakers: Int = 20,
-    private val embDim: Int = 256,
+    private val embDim: Int = 512,
 ) {
     /** 전역 화자 ID → 센트로이드 임베딩 */
     private val centroids = mutableMapOf<Int, FloatArray>()

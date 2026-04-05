@@ -10,24 +10,24 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
- * wespeaker-voxceleb-resnet34-LM ONNX 임베딩 모델 래퍼.
+ * wespeaker-voxceleb-campplus-LM ONNX 임베딩 모델 래퍼.
  *
  * 모델 입출력:
  *   입력: feats  (B, T, 80)  – 80차원 log mel filterbank
- *   출력: embs   (B, 256)    – L2 정규화된 화자 임베딩
+ *   출력: embs   (B, 512)    – L2 정규화된 화자 임베딩 (CAM++ 512차원)
  *
  * 성능 최적화:
- *  - mel 특징을 청크 단위로 미리 추출 (extractMelCache) → 화자별 재사용
- *  - 프레임 서브샘플링: 4배 다운샘플 (498 → ~125 프레임)로 ResNet 부하 감소
+ *  - mel 특징을 청크 단위로 미리 추출 → 화자별 재사용
+ *  - SUBSAMPLE=4: 498 → ~125 프레임, CAM++로 ~0.5s 실시간 처리
  */
 class EmbeddingModel(context: Context) : AutoCloseable {
 
     companion object {
-        const val EMBEDDING_DIM = 256
+        const val EMBEDDING_DIM = 512         // CAM++ 출력 512차원
         const val N_MELS = 80
         private const val N_FFT = 512
         private const val HOP_LENGTH = 160   // 10ms
-        private const val SUBSAMPLE = 2      // mel 프레임 2개 중 1개만 사용 → 임베딩 품질/속도 균형
+        private const val SUBSAMPLE = 4      // CAM++ + SUBSAMPLE=4 → ~0.5s 실시간
         private const val MIN_WEIGHT = 1e-8f
     }
 

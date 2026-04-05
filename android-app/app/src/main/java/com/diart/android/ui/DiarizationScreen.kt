@@ -2,9 +2,6 @@ package com.diart.android.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -17,9 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.diart.android.DiarizationViewModel
-import com.diart.android.pipeline.SpeakerTurn
 import com.diart.android.ui.theme.speakerColor
-import kotlinx.coroutines.launch
 
 @Composable
 fun DiarizationScreen(vm: DiarizationViewModel) {
@@ -29,18 +24,6 @@ fun DiarizationScreen(vm: DiarizationViewModel) {
     val recentTurns by vm.recentTurns.collectAsState()
     val activeSpeaker by vm.activeSpeaker.collectAsState()
     val processedSec by vm.processedSec.collectAsState()
-
-    val listState = rememberLazyListState()
-    val coroutineScope = rememberCoroutineScope()
-
-    // 새 발화가 추가되면 자동 스크롤
-    LaunchedEffect(recentTurns.size) {
-        if (recentTurns.isNotEmpty()) {
-            coroutineScope.launch {
-                listState.animateScrollToItem(recentTurns.size - 1)
-            }
-        }
-    }
 
     Column(
         modifier = Modifier
@@ -94,43 +77,10 @@ fun DiarizationScreen(vm: DiarizationViewModel) {
         DiarizationPlot(
             turns = recentTurns,
             processedSec = processedSec,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-
-        // 발화 타임라인
-        LazyColumn(
-            state = listState,
             modifier = Modifier
-                .weight(1f)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surface),
-            contentPadding = PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            if (recentTurns.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = if (isModelLoaded) "녹음을 시작하면 여기에 발화 구간이 표시됩니다."
-                                   else "모델 로딩 중...",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-            } else {
-                items(recentTurns) { turn ->
-                    TurnRow(turn)
-                }
-            }
-        }
+                .weight(1f),
+        )
 
         Spacer(Modifier.height(16.dp))
 
@@ -172,7 +122,6 @@ private fun ActiveSpeakerCard(speakerId: Int, isRunning: Boolean) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // 활성 인디케이터
             Box(
                 modifier = Modifier
                     .size(12.dp)
@@ -192,49 +141,6 @@ private fun ActiveSpeakerCard(speakerId: Int, isRunning: Boolean) {
 }
 
 @Composable
-private fun TurnRow(turn: SpeakerTurn) {
-    val color = speakerColor(turn.speakerId)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(color.copy(alpha = 0.1f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // 화자 색상 인디케이터
-        Box(
-            modifier = Modifier
-                .width(4.dp)
-                .height(36.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(color),
-        )
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = turn.label,
-                style = MaterialTheme.typography.labelLarge,
-                color = color,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "${formatTime(turn.startSec)} – ${formatTime(turn.endSec)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        Text(
-            text = "%.1fs".format(turn.durationSec),
-            style = MaterialTheme.typography.labelMedium,
-            color = color.copy(alpha = 0.8f),
-        )
-    }
-}
-
-@Composable
 private fun StatChip(text: String) {
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -247,11 +153,4 @@ private fun StatChip(text: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-private fun formatTime(sec: Float): String {
-    val m = (sec / 60).toInt()
-    val s = (sec % 60).toInt()
-    val ms = ((sec % 1) * 10).toInt()
-    return "%02d:%02d.%d".format(m, s, ms)
 }

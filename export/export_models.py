@@ -105,30 +105,30 @@ def export_segmentation(output_dir: Path, hf_token: str):
 
 def export_embedding(output_dir: Path, hf_token: str):
     """
-    wespeaker-voxceleb-resnet34-LM ONNX 모델을 HuggingFace에서 다운로드합니다.
-    입력: waveform (batch, 1, samples)
-    출력: embedding (batch, 256)
+    wespeaker-voxceleb-campplus-LM ONNX 모델을 HuggingFace에서 다운로드합니다.
+    입력: feats (B, T, 80) – log mel filterbank
+    출력: embs  (B, 512)   – L2 정규화된 화자 임베딩
+    ResNet34(131ms) 대비 CAM++는 ~50ms로 2.6배 빠름.
     """
-    print("[2/2] Downloading wespeaker embedding model ...")
+    print("[2/2] Downloading wespeaker CAM++ embedding model ...")
 
     try:
         from huggingface_hub import hf_hub_download
         model_path = hf_hub_download(
-            repo_id="hbredin/wespeaker-voxceleb-resnet34-LM",
-            filename="wespeaker-voxceleb-resnet34-LM.onnx",
+            repo_id="wespeaker/wespeaker-voxceleb-campplus-LM",
+            filename="voxceleb_CAM++_LM.onnx",
             token=hf_token,
         )
         dst = output_dir / "embedding.onnx"
         shutil.copy(model_path, dst)
 
-        # 입출력 형태 확인
         sess = ort.InferenceSession(str(dst), providers=["CPUExecutionProvider"])
         print(f"  Inputs:  {[(i.name, i.shape) for i in sess.get_inputs()]}")
         print(f"  Outputs: {[(o.name, o.shape) for o in sess.get_outputs()]}")
         print(f"  Saved → {dst}")
 
     except Exception as e:
-        print(f"  WARNING: wespeaker download failed ({e})")
+        print(f"  WARNING: CAM++ download failed ({e})")
         print("  Falling back to pyannote/embedding ...")
         _export_pyannote_embedding(output_dir, hf_token)
 
