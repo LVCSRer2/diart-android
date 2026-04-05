@@ -106,48 +106,44 @@ private fun RecordingItem(
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            // 1행: 날짜 + 버튼
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text(
                     text = dateFormatter.format(Date(info.createdAt)),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    InfoBadge(formatDuration(info.durationSec))
-                    InfoBadge("${info.speakerCount}명 감지")
-                    InfoBadge("${info.turnCount}구간")
+                FilledTonalButton(
+                    onClick = onPlay,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text("▶ 재생", fontSize = 11.sp)
+                }
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(
+                    onClick = onDelete,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                    ),
+                ) {
+                    Text("삭제", fontSize = 11.sp)
                 }
             }
-
-            Spacer(Modifier.width(8.dp))
-
-            // 재생 버튼
-            FilledTonalButton(
-                onClick = onPlay,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-            ) {
-                Text("▶ 재생", fontSize = 13.sp)
-            }
-
-            Spacer(Modifier.width(6.dp))
-
-            // 삭제 버튼
-            OutlinedButton(
-                onClick = onDelete,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error,
-                ),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
-                ),
-            ) {
-                Text("삭제", fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
+            // 2행: 배지 한 줄
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                InfoBadge(formatDuration(info.durationSec))
+                InfoBadge("${info.speakerCount}명 감지")
+                InfoBadge("${info.turnCount}구간")
             }
         }
     }
