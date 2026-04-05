@@ -70,6 +70,9 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
     private val _playbackTurns = MutableStateFlow<List<SpeakerTurn>>(emptyList())
     val playbackTurns: StateFlow<List<SpeakerTurn>> = _playbackTurns
 
+    private val _refinedPlaybackTurns = MutableStateFlow<List<SpeakerTurn>?>(null)
+    val refinedPlaybackTurns: StateFlow<List<SpeakerTurn>?> = _refinedPlaybackTurns
+
     private val _totalRecordedSec = MutableStateFlow(0f)
     val totalRecordedSec: StateFlow<Float> = _totalRecordedSec
 
@@ -176,20 +179,37 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
         _activeSpeaker.value = -1
         _statusMessage.value = "저장 중..."
 
-        val totalSec = _processedSec.value
-        val turns = allTurns.toList()
+        val totalSec  = _processedSec.value
+        val turns     = allTurns.toList()
+        val p         = pipeline
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 delay(100)
                 val pcm = synchronized(pcmBuffer) { pcmBuffer.toByteArray() }
-                val info = RecordingRepository.save(context, pcm, turns, totalSec, audioCapturer.sampleRate)
+
+                // AHC 오프라인 정밀 분석
+                val refinedTurns: List<SpeakerTurn>? = if (p != null && p.collectedSegmentCount >= 2) {
+                    _statusMessage.value = "정밀 분석 중... (${p.collectedSegmentCount}개 세그먼트)"
+                    try {
+                        val result = p.refineWithAHC(_settings.value.ahcThreshold)
+                        Log.d(TAG, "AHC refined: ${result.size} turns, ${result.map { it.speakerId }.toSet().size} speakers")
+                        result
+                    } catch (e: Exception) {
+                        Log.e(TAG, "AHC failed", e)
+                        null
+                    }
+                } else null
+
+                val info = RecordingRepository.save(context, pcm, turns, refinedTurns, totalSec, audioCapturer.sampleRate)
                 Log.d(TAG, "Saved recording: ${info.id}, ${pcm.size / 1024}KB, ${turns.size} turns")
 
                 _recordings.value = RecordingRepository.loadAll(context)
                 _playbackFile.value = info.wavFile
                 _playbackTurns.value = turns
+                _refinedPlaybackTurns.value = refinedTurns
                 _totalRecordedSec.value = totalSec
+                _statusMessage.value = if (refinedTurns != null) "정밀 분석 완료" else "저장 완료"
                 _showPlayback.value = true
             } catch (e: Exception) {
                 Log.e(TAG, "Save failed", e)
@@ -222,9 +242,11 @@ class DiarizationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun playRecording(info: RecordingInfo) {
         viewModelScope.launch(Dispatchers.IO) {
-            val turns = RecordingRepository.loadTurns(info.turnsFile)
+            val turns        = RecordingRepository.loadTurns(info.turnsFile)
+            val refinedTurns = info.refinedTurnsFile?.let { RecordingRepository.loadTurns(it) }
             _playbackFile.value = info.wavFile
             _playbackTurns.value = turns
+            _refinedPlaybackTurns.value = refinedTurns
             _totalRecordedSec.value = info.durationSec
             _showPlayback.value = true
         }

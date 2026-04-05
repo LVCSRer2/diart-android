@@ -20,12 +20,13 @@ fun SettingsScreen(
     onApply: (SettingsState) -> Unit,
     onBack: () -> Unit,
 ) {
-    var tauActive   by remember(current) { mutableFloatStateOf(current.tauActive) }
-    var deltaNow    by remember(current) { mutableFloatStateOf(current.deltaNow) }
-    var rhoUpdate   by remember(current) { mutableFloatStateOf(current.rhoUpdate) }
-    var gamma       by remember(current) { mutableFloatStateOf(current.gamma) }
-    var beta        by remember(current) { mutableFloatStateOf(current.beta) }
-    var maxSpeakers by remember(current) { mutableIntStateOf(current.maxSpeakers) }
+    var tauActive    by remember(current) { mutableFloatStateOf(current.tauActive) }
+    var deltaNow     by remember(current) { mutableFloatStateOf(current.deltaNow) }
+    var rhoUpdate    by remember(current) { mutableFloatStateOf(current.rhoUpdate) }
+    var gamma        by remember(current) { mutableFloatStateOf(current.gamma) }
+    var beta         by remember(current) { mutableFloatStateOf(current.beta) }
+    var maxSpeakers  by remember(current) { mutableIntStateOf(current.maxSpeakers) }
+    var ahcThreshold by remember(current) { mutableFloatStateOf(current.ahcThreshold) }
 
     Column(
         modifier = Modifier
@@ -119,10 +120,23 @@ fun SettingsScreen(
             )
 
             Spacer(Modifier.height(8.dp))
+            SectionHeader("정밀 분석 (오프라인 AHC)")
+
+            SliderRow(
+                label = "AHC 합병 임계값 (ahcThreshold)",
+                description = "낮을수록 화자 구분이 세밀해짐 (코사인 거리)",
+                value = ahcThreshold,
+                onValueChange = { ahcThreshold = it },
+                valueRange = 0.2f..0.9f,
+                displayText = "%.2f".format(ahcThreshold),
+            )
+
+            Spacer(Modifier.height(8.dp))
             SectionHeader("기본값 참고")
             InfoCard(
                 "tauActive=0.4  deltaNow=0.40  rhoUpdate=0.10\n" +
-                "gamma=3.0  beta=10.0  maxSpeakers=20"
+                "gamma=3.0  beta=10.0  maxSpeakers=20\n" +
+                "ahcThreshold=0.50"
             )
         }
 
@@ -132,12 +146,13 @@ fun SettingsScreen(
             onClick = {
                 onApply(
                     SettingsState(
-                        tauActive = tauActive,
-                        deltaNow = deltaNow,
-                        rhoUpdate = rhoUpdate,
-                        gamma = gamma,
-                        beta = beta,
-                        maxSpeakers = maxSpeakers,
+                        tauActive    = tauActive,
+                        deltaNow     = deltaNow,
+                        rhoUpdate    = rhoUpdate,
+                        gamma        = gamma,
+                        beta         = beta,
+                        maxSpeakers  = maxSpeakers,
+                        ahcThreshold = ahcThreshold,
                     )
                 )
             },

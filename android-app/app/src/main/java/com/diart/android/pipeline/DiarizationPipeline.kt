@@ -103,6 +103,20 @@ class DiarizationPipeline(
             segmentation, globalIds, chunkStartSec, secPerFrame, tauActive
         )
 
+        // 8. AHC용 세그먼트 수집 (COLLECT_INTERVAL 청크마다 1회)
+        chunkCount++
+        if (chunkCount % COLLECT_INTERVAL == 0) {
+            for (localIdx in 0 until numLocalSpeakers) {
+                if (activityProbs[localIdx] < tauActive) continue
+                val emb = embeddings[localIdx]
+                if (emb.any { it != 0f }) {
+                    collectedSegments.add(
+                        SegmentEntry(chunkStartSec, chunkStartSec + 5f, emb.copyOf())
+                    )
+                }
+            }
+        }
+
         return DiarizationResult(chunkStartSec, speakerTurns)
     }
 
@@ -143,8 +157,25 @@ class DiarizationPipeline(
         return turns.sortedBy { it.startSec }
     }
 
+    // ── 오프라인 AHC ─────────────────────────────────────────────────────
+
+    private val collectedSegments = mutableListOf<SegmentEntry>()
+    private var chunkCount = 0
+    private val COLLECT_INTERVAL = 10  // 0.5s 스텝 × 10 = 5초마다 1회 수집
+
+    /**
+     * 수집된 임베딩 전체에 AHC를 적용해 정제된 화자 분리 결과를 반환합니다.
+     * 녹음 완료 후 호출하세요.
+     */
+    fun refineWithAHC(threshold: Float): List<SpeakerTurn> =
+        AHCSpeakerClustering(threshold).cluster(collectedSegments.toList())
+
+    val collectedSegmentCount: Int get() = collectedSegments.size
+
     fun reset() {
         clustering.reset()
+        collectedSegments.clear()
+        chunkCount = 0
     }
 
     override fun close() {

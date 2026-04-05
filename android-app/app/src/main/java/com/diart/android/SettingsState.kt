@@ -13,4 +13,6 @@ data class SettingsState(
     val beta: Float = 10f,
     /** 최대 추적 화자 수 */
     val maxSpeakers: Int = 20,
+    /** AHC 오프라인 분석 합병 임계값 (cosine distance) */
+    val ahcThreshold: Float = 0.5f,
 )

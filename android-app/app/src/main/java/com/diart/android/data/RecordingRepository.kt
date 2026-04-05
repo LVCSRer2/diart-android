@@ -29,14 +29,16 @@ object RecordingRepository {
                 val wavFile   = File(dir(context), "$id.wav")
                 val turnsFile = File(dir(context), "$id.json")
                 if (!wavFile.exists()) return@mapNotNull null
+                val refinedFile = File(dir(context), "${id}_refined.json")
                 RecordingInfo(
-                    id           = id,
-                    createdAt    = obj.getLong("createdAt"),
-                    durationSec  = obj.getDouble("durationSec").toFloat(),
-                    speakerCount = obj.getInt("speakerCount"),
-                    turnCount    = obj.getInt("turnCount"),
-                    wavFile      = wavFile,
-                    turnsFile    = turnsFile,
+                    id               = id,
+                    createdAt        = obj.getLong("createdAt"),
+                    durationSec      = obj.getDouble("durationSec").toFloat(),
+                    speakerCount     = obj.getInt("speakerCount"),
+                    turnCount        = obj.getInt("turnCount"),
+                    wavFile          = wavFile,
+                    turnsFile        = turnsFile,
+                    refinedTurnsFile = if (refinedFile.exists()) refinedFile else null,
                 )
             }.sortedByDescending { it.createdAt }
         } catch (e: Exception) {
@@ -50,26 +52,30 @@ object RecordingRepository {
         context: Context,
         pcmData: ByteArray,
         turns: List<SpeakerTurn>,
+        refinedTurns: List<SpeakerTurn>?,
         durationSec: Float,
         sampleRate: Int,
     ): RecordingInfo {
-        val id        = UUID.randomUUID().toString()
-        val d         = dir(context)
-        val wavFile   = File(d, "$id.wav")
-        val turnsFile = File(d, "$id.json")
+        val id              = UUID.randomUUID().toString()
+        val d               = dir(context)
+        val wavFile         = File(d, "$id.wav")
+        val turnsFile       = File(d, "$id.json")
+        val refinedFile     = if (refinedTurns != null) File(d, "${id}_refined.json") else null
 
         WavWriter.write(wavFile, pcmData, sampleRate)
         turnsFile.writeText(serializeTurns(turns))
+        refinedFile?.writeText(serializeTurns(refinedTurns!!))
 
         val speakerCount = turns.map { it.speakerId }.toSet().size
         val info = RecordingInfo(
-            id           = id,
-            createdAt    = System.currentTimeMillis(),
-            durationSec  = durationSec,
-            speakerCount = speakerCount,
-            turnCount    = turns.size,
-            wavFile      = wavFile,
-            turnsFile    = turnsFile,
+            id               = id,
+            createdAt        = System.currentTimeMillis(),
+            durationSec      = durationSec,
+            speakerCount     = speakerCount,
+            turnCount        = turns.size,
+            wavFile          = wavFile,
+            turnsFile        = turnsFile,
+            refinedTurnsFile = refinedFile,
         )
         val existing = loadAll(context).toMutableList()
         existing.add(0, info)
@@ -82,6 +88,7 @@ object RecordingRepository {
     fun delete(context: Context, id: String) {
         File(dir(context), "$id.wav").delete()
         File(dir(context), "$id.json").delete()
+        File(dir(context), "${id}_refined.json").delete()
         val updated = loadAll(context).filter { it.id != id }
         writeIndex(context, updated)
     }

@@ -40,22 +40,24 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    val showPlayback      by vm.showPlayback.collectAsState()
-                    val showRecordingList by vm.showRecordingList.collectAsState()
-                    val showSettings      by vm.showSettings.collectAsState()
-                    val settings          by vm.settings.collectAsState()
-                    val playbackFile      by vm.playbackFile.collectAsState()
-                    val playbackTurns     by vm.playbackTurns.collectAsState()
-                    val totalRecordedSec  by vm.totalRecordedSec.collectAsState()
-                    val recordings        by vm.recordings.collectAsState()
+                    val showPlayback         by vm.showPlayback.collectAsState()
+                    val showRecordingList    by vm.showRecordingList.collectAsState()
+                    val showSettings         by vm.showSettings.collectAsState()
+                    val settings             by vm.settings.collectAsState()
+                    val playbackFile         by vm.playbackFile.collectAsState()
+                    val playbackTurns        by vm.playbackTurns.collectAsState()
+                    val refinedPlaybackTurns by vm.refinedPlaybackTurns.collectAsState()
+                    val totalRecordedSec     by vm.totalRecordedSec.collectAsState()
+                    val recordings           by vm.recordings.collectAsState()
 
                     when {
                         showPlayback && playbackFile != null ->
                             PlaybackScreen(
-                                audioFile       = playbackFile!!,
-                                turns           = playbackTurns,
+                                audioFile        = playbackFile!!,
+                                turns            = playbackTurns,
+                                refinedTurns     = refinedPlaybackTurns,
                                 totalDurationSec = totalRecordedSec,
-                                onBack          = { vm.closePlayback() },
+                                onBack           = { vm.closePlayback() },
                             )
 
                         showRecordingList ->

@@ -23,6 +23,7 @@ import kotlin.math.max
 fun PlaybackScreen(
     audioFile: File,
     turns: List<SpeakerTurn>,
+    refinedTurns: List<SpeakerTurn>?,
     totalDurationSec: Float,
     onBack: () -> Unit,
 ) {
@@ -31,6 +32,9 @@ fun PlaybackScreen(
     var currentPositionSec by remember { mutableFloatStateOf(0f) }
     var duration by remember { mutableFloatStateOf(max(totalDurationSec, 1f)) }
     var prepared by remember { mutableStateOf(false) }
+    // 온라인 결과 / 정밀(AHC) 결과 토글
+    var showRefined by remember(refinedTurns) { mutableStateOf(refinedTurns != null) }
+    val displayTurns = if (showRefined && refinedTurns != null) refinedTurns else turns
 
     // MediaPlayer 초기화
     DisposableEffect(audioFile) {
@@ -59,7 +63,7 @@ fun PlaybackScreen(
     }
 
     // 현재 위치에서 활성 화자
-    val activeSpeaker = turns
+    val activeSpeaker = displayTurns
         .filter { it.startSec <= currentPositionSec && it.endSec >= currentPositionSec }
         .maxByOrNull { it.durationSec }
         ?.speakerId ?: -1
@@ -87,7 +91,19 @@ fun PlaybackScreen(
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.weight(1f))
-            Spacer(Modifier.width(64.dp))
+            // 정밀 분석 결과가 있을 때만 토글 표시
+            if (refinedTurns != null) {
+                TextButton(onClick = { showRefined = !showRefined }) {
+                    Text(
+                        text = if (showRefined) "정밀" else "온라인",
+                        fontSize = 12.sp,
+                        color = if (showRefined) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                Spacer(Modifier.width(64.dp))
+            }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -100,7 +116,7 @@ fun PlaybackScreen(
 
         // 타임라인 플롯 (전체 녹음 + 커서)
         DiarizationPlot(
-            turns = turns,
+            turns = displayTurns,
             processedSec = duration,
             windowSec = 30f,
             currentPositionSec = currentPositionSec,
@@ -212,9 +228,9 @@ fun PlaybackScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            val speakerCount = turns.map { it.speakerId }.toSet().size
+            val speakerCount = displayTurns.map { it.speakerId }.toSet().size
             StatChip("${speakerCount}명 감지")
-            StatChip("${turns.size}개 구간")
+            StatChip("${displayTurns.size}개 구간")
             StatChip("총 ${duration.toInt()}초")
         }
     }

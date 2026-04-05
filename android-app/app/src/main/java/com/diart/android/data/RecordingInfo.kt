@@ -10,4 +10,5 @@ data class RecordingInfo(
     val turnCount: Int,
     val wavFile: File,
     val turnsFile: File,
+    val refinedTurnsFile: File?,  // AHC 정밀 분석 결과 (없으면 null)
 )
