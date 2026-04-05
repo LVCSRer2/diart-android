@@ -1,0 +1,19 @@
+# Android build
+android-app/.gradle/
+android-app/app/build/
+android-app/build/
+android-app/local.properties
+
+# ONNX 모델 (용량이 크므로 별도 관리)
+android-app/app/src/main/assets/*.onnx
+android-app/app/src/main/assets/*.bin
+
+# Python export
+export/__pycache__/
+export/*.onnx
+export/models/
+
+# IDE
+.idea/
+*.iml
+*.DS_Store
